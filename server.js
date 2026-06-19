@@ -40,7 +40,14 @@ const PORT = process.env.PORT || 3000;
 /* ---------------------------------------------------------
    DATABASE — money stored as INTEGER minor units (pesewas/kobo)
 --------------------------------------------------------- */
-const db = new DatabaseSync("./orders.db");
+// Store the database on the persistent volume when one is mounted.
+// Railway sets RAILWAY_VOLUME_MOUNT_PATH to the volume's path (e.g. /data).
+// Falls back to the local folder for running on your own computer.
+const fs = require("fs");
+const DATA_DIR = process.env.RAILWAY_VOLUME_MOUNT_PATH || process.env.DATA_DIR || ".";
+try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch (e) {}
+const DB_FILE = DATA_DIR.replace(/\/+$/, "") + "/orders.db";
+const db = new DatabaseSync(DB_FILE);
 db.exec(`
   CREATE TABLE IF NOT EXISTS orders (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
