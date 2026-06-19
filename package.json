@@ -1,0 +1,12 @@
+{
+  "name": "paystack-order-server",
+  "version": "1.0.0",
+  "description": "Webhook + verification + order log for Asaase Gold and HaloClip stores",
+  "main": "server.js",
+  "scripts": {
+    "start": "node --experimental-sqlite server.js"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  }
+}
