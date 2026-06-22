@@ -74,6 +74,7 @@ module.exports = function ADMIN_HTML(token) {
   <h1>📦 Store Orders</h1>
   <span class="updated" id="updated"></span>
   <span class="sp"></span>
+  <a class="btn" href="/admin/riders?token=${token}" style="text-decoration:none;display:inline-flex;align-items:center">🏍️ Riders</a>
   <button class="btn" onclick="load()">↻ Refresh</button>
   <button class="btn" onclick="exportCSV()">⬇ Export CSV</button>
 </header>
