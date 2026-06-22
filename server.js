@@ -79,6 +79,29 @@ const insertOrder = db.prepare(`
    customer, delivery, items, notes, promo, paid_at, raw_json)
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
+// HaloRide dispatch bookings. Upsert so the rich booking detail (pickup, drop-off,
+// sender/receiver) always lands even if the Paystack webhook created a bare row first.
+// Money + paid-status are locked once 'paid' — a later /api/booking call can never
+// downgrade a confirmed payment or overwrite the verified amount.
+const upsertBooking = db.prepare(`
+  INSERT INTO orders
+    (reference, store, status, amount_minor, currency, channel, customer_email,
+     customer, delivery, items, notes, promo, paid_at, raw_json)
+  VALUES (?, 'haloride', ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+  ON CONFLICT(reference) DO UPDATE SET
+    store          = 'haloride',
+    status         = CASE WHEN orders.status='paid' THEN 'paid'           ELSE excluded.status        END,
+    amount_minor   = CASE WHEN orders.status='paid' THEN orders.amount_minor ELSE excluded.amount_minor END,
+    currency       = CASE WHEN orders.status='paid' THEN orders.currency   ELSE excluded.currency      END,
+    channel        = COALESCE(orders.channel, excluded.channel),
+    customer_email = COALESCE(orders.customer_email, excluded.customer_email),
+    customer       = COALESCE(excluded.customer, orders.customer),
+    delivery       = COALESCE(excluded.delivery, orders.delivery),
+    items          = COALESCE(excluded.items, orders.items),
+    notes          = COALESCE(excluded.notes, orders.notes),
+    paid_at        = COALESCE(orders.paid_at, excluded.paid_at),
+    raw_json       = excluded.raw_json
+`);
 const listOrders = db.prepare(`SELECT * FROM orders ORDER BY id DESC LIMIT 500`);
 const getOrder = db.prepare(`SELECT * FROM orders WHERE reference = ?`);
 const toggleFulfilled = db.prepare(`UPDATE orders SET fulfilled = 1 - fulfilled WHERE reference = ?`);
@@ -284,6 +307,7 @@ function storeFromReference(ref = "") {
   if (ref.startsWith("AG-")) return "asaase-gold";
   if (ref.startsWith("HC-")) return "haloclip";
   if (ref.startsWith("HM-")) return "halomart";
+  if (ref.startsWith("HR-")) return "haloride";
   return "unknown";
 }
 
@@ -483,6 +507,64 @@ const server = http.createServer(async (req, res) => {
       // --- the dashboard shell (data loads via fetch) ---
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       return res.end(ADMIN_HTML(ADMIN_TOKEN));
+    }
+
+    /* ---------- HaloRide booking (dispatch site → dashboard) ---------- */
+    if (req.method === "POST" && url.pathname === "/api/booking") {
+      let b;
+      try { b = JSON.parse(await readBody(req) || "{}"); }
+      catch { return json(res, 400, { error: "bad json" }); }
+
+      const reference = String(b.reference || "").trim();
+      if (!reference) return json(res, 400, { error: "missing reference" });
+
+      // Fold the booking into the same columns the dashboard already renders,
+      // so HaloRide rows show pickup/drop-off, package, sender & receiver with
+      // zero dashboard changes. "Message buyer" reads the phone from `customer`;
+      // "Copy address" reads `delivery`.
+      const sender   = b.sender   || {};
+      const receiver = b.receiver || {};
+      const customer = [sender.name, sender.phone].filter(Boolean).join(" · ") || null;
+      const km = (b.distanceKm != null && b.distanceKm !== "") ? `${b.distanceKm} km` : null;
+      const delivery = [
+        b.pickup  ? "From: " + b.pickup  : null,
+        b.dropoff ? "To: "   + b.dropoff : null,
+        km,
+      ].filter(Boolean).join("  ·  ") || null;
+      const items = ["🏍️ HaloRide", b.size, b.express ? "EXPRESS" : null]
+        .filter(Boolean).join(" · ");
+      const recvLine = [receiver.name, receiver.phone].filter(Boolean).join(" · ");
+      const notes = [
+        recvLine ? "Receiver: " + recvLine : null,
+        b.notes || null,
+      ].filter(Boolean).join(" — ") || null;
+
+      // NEVER trust the client for money or paid-status: the secret key lives
+      // here, so confirm the charge with Paystack before marking it paid.
+      try {
+        const v = await verifyWithPaystack(reference);
+        const status = v.status === "success" ? "paid" : "pending-review";
+        upsertBooking.run(
+          reference, status, v.amount, v.currency,
+          v.channel || null, v.customer?.email || b.email || null,
+          customer, delivery, items, notes, v.paid_at || null,
+          JSON.stringify({ booking: b, paystack: v })
+        );
+        console.log(`✔ HaloRide booking: ${reference} · ${status} · ${v.currency} ${(v.amount / 100).toLocaleString()}`);
+        return json(res, 200, { ok: true, status });
+      } catch (e) {
+        // Verify failed transiently — save the details for review so the booking
+        // is never lost. The webhook (or a manual re-verify) confirms payment;
+        // the upsert above will not downgrade a row that is already paid.
+        const amtMinor = Math.round((Number(b.amount) || 0) * 100);
+        upsertBooking.run(
+          reference, "pending-review", amtMinor, b.currency || "GHS",
+          null, b.email || null, customer, delivery, items, notes, null,
+          JSON.stringify({ booking: b, verifyError: e.message })
+        );
+        console.warn(`! HaloRide booking ${reference} saved for review (verify failed: ${e.message})`);
+        return json(res, 200, { ok: true, status: "pending-review" });
+      }
     }
 
     /* ---------- customer accounts API ---------- */
