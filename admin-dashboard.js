@@ -47,7 +47,11 @@ module.exports = function ADMIN_HTML(token) {
   .order.done{opacity:.55}
   .order-top{display:flex;justify-content:space-between;gap:1rem;align-items:flex-start;flex-wrap:wrap}
   .ref{font-weight:800;font-size:.95rem}
-  .ref .store{display:inline-block;font-size:.66rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--dim);background:var(--card2);border:1px solid var(--line);border-radius:6px;padding:.1rem .4rem;margin-left:.5rem;vertical-align:middle}
+  .ref .store{display:inline-block;font-size:.66rem;font-weight:700;letter-spacing:.02em;color:var(--dim);background:var(--card2);border:1px solid var(--line);border-radius:6px;padding:.12rem .45rem;margin-left:.5rem;vertical-align:middle}
+  .ref .store[data-store="halomart"]    {color:#7cc4ff;background:rgba(124,196,255,.12);border-color:rgba(124,196,255,.35)}
+  .ref .store[data-store="haloclip"]    {color:#ffd56b;background:rgba(255,213,107,.12);border-color:rgba(255,213,107,.35)}
+  .ref .store[data-store="asaase-gold"] {color:var(--gold);background:rgba(224,169,43,.14);border-color:rgba(224,169,43,.40)}
+  .ref .store[data-store="haloride"]    {color:#ff9e64;background:rgba(255,158,100,.14);border-color:rgba(255,158,100,.40)}
   .amt{font-size:1.15rem;font-weight:800;white-space:nowrap}
   .pill{display:inline-block;font-size:.68rem;font-weight:700;padding:.18rem .5rem;border-radius:6px;text-transform:uppercase;letter-spacing:.04em}
   .pill.paid{background:rgba(63,165,106,.16);color:var(--green)}
@@ -105,6 +109,14 @@ let tab = "toship";
 
 const money = (m,c)=> (c==="GHS"?"₵":"₦") + (Number(m||0)/100).toLocaleString();
 const esc = s => String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+// Pretty, branded names for the store badge + filter dropdown.
+const STORE_LABELS = {
+  "halomart":     "🛒 HaloMart",
+  "haloclip":     "💡 HaloClip",
+  "asaase-gold":  "✨ Asaase Gold",
+  "haloride":     "🏍️ HaloRide",
+};
+const storeLabel = s => STORE_LABELS[s] || ("📦 " + (s ? s.charAt(0).toUpperCase()+s.slice(1) : "Other"));
 
 async function api(path, opts){
   const u = path + (path.includes("?")?"&":"?") + "token=" + encodeURIComponent(TOKEN);
@@ -119,7 +131,7 @@ async function load(){
     const sf = document.getElementById("storeFilter");
     const stores = [...new Set(DATA.orders.map(o=>o.store))].sort();
     const current = sf.value;
-    sf.innerHTML = '<option value="">All stores</option>' + stores.map(s=>'<option value="'+esc(s)+'">'+esc(s)+'</option>').join("");
+    sf.innerHTML = '<option value="">All stores</option>' + stores.map(s=>'<option value="'+esc(s)+'">'+esc(storeLabel(s))+'</option>').join("");
     sf.value = current;
     renderStats();
     render();
@@ -186,7 +198,7 @@ function render(){
                       : '<span class="pill failed">'+esc(o.status)+'</span>';
     return '<div class="order '+(o.fulfilled?"done":"")+'">'
       + '<div class="order-top"><div>'
-        + '<span class="ref">'+esc(o.reference)+'<span class="store">'+esc(o.store)+'</span></span><br/>'
+        + '<span class="ref">'+esc(o.reference)+'<span class="store" data-store="'+esc(o.store)+'">'+esc(storeLabel(o.store))+'</span></span><br/>'
         + '<span class="muted">'+dateStr+' · '+esc(o.channel||"")+' '+statusPill+'</span>'
       + '</div><div class="amt">'+money(o.amount_minor,o.currency)+'</div></div>'
       + '<div class="meta">'
